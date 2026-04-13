@@ -412,7 +412,7 @@ function parseFullData(headers, allRows, mapping) {
 function isDateLike(v) {
     if (!v) return false;
     var s = String(v);
-    return /^\\d{4}[-/]\\d{1,2}[-/]\\d{1,2}/.test(s) || /\\d{4}年/.test(s) || /^\\d{1,2}\\/\\d{1,2}\\/\\d{2,4}/.test(s);
+    return /^\d{4}[-/]\d{1,2}[-/]\d{1,2}/.test(s) || /\d{4}年/.test(s) || /^\d{1,2}\/\d{1,2}\/\d{2,4}/.test(s);
 }
 
 function isRevenueLike(v) {
@@ -432,11 +432,11 @@ function normalizeDate(val) {
         return val.toISOString().split('T')[0];
     }
     var str = String(val).trim();
-    if (/^\\d{4}-\\d{2}-\\d{2}/.test(str)) return str.slice(0,10);
-    if (/^\\d{4}\\/\\d{2}\\/\\d{2}/.test(str)) return str.slice(0,10).replace(/\\//g, '-');
-    var cn = str.match(/(\\d{4})年(\\d{1,2})月(\\d{1,2})日/);
+    if (/^\d{4}-\d{2}-\d{2}/.test(str)) return str.slice(0,10);
+    if (/^\d{4}\/\d{2}\/\d{2}/.test(str)) return str.slice(0,10).replace(/\//g, '-');
+    var cn = str.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/);
     if (cn) return cn[1]+'-'+cn[2].padStart(2,'0')+'-'+cn[3].padStart(2,'0');
-    var sl = str.match(/^(\\d{1,2})\\/(\\d{1,2})\\/(\\d{2,4})$/);
+    var sl = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
     if (sl) {
         var y = sl[3].padStart(4,'20');
         return parseInt(sl[1]) > 12 ? y+'-'+sl[2].padStart(2,'0')+'-'+sl[1].padStart(2,'0') : y+'-'+sl[1].padStart(2,'0')+'-'+sl[2].padStart(2,'0');
