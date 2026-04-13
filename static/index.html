@@ -130,9 +130,9 @@
 
     <!-- Server status bar -->
     <div class="server-bar server-off" id="serverBar">
-        <div class="label">后端服务</div>
-        <div class="cmd" id="serverCmd">python3 server.py</div>
-        <div style="font-size:12px;color:var(--text2)">→ 终端运行</div>
+        <div class="label">🤖 AI后端</div>
+        <div class="cmd" id="serverCmd">Cloudflare Workers（免费）</div>
+        <div style="font-size:12px;color:var(--text2)" id="backendStatus">未配置</div>
     </div>
 
     <!-- Upload -->
@@ -221,7 +221,7 @@
 </div>
 
 <script>
-var API = ''; // empty = same origin (when served by Flask)
+var CF_WORKER_URL = ''; // 👈 部署Cloudflare Worker后，把URL填在这里，比如 'https://xxx.workers.dev'
 var rawData = [], dailyData = {}, timeRangeData = {}, thisWeekData = 0, lastWeekData = 0;
 var charts = {};
 var parsedMapping = null;
@@ -229,21 +229,26 @@ var parsedMapping = null;
 // ============================================================
 // SERVER CHECK
 // ============================================================
-function checkServer() {
-    fetch(API + '/health')
-        .then(function(r) { return r.json(); })
-        .then(function(d) {
-            if (d.status === 'ok') {
-                document.getElementById('serverBar').className = 'server-bar server-ok';
-                document.getElementById('serverStatus').textContent = '已连接';
-                document.getElementById('serverStatus').className = 'status-text';
-            }
-        })
-        .catch(function() {
-            document.getElementById('serverBar').className = 'server-bar server-off';
-            document.getElementById('serverStatus').textContent = '服务器未运行';
-            document.getElementById('serverStatus').className = 'status-text status-warn';
-        });
+function checkBackend() {
+    if (!CF_WORKER_URL) {
+        document.getElementById('serverBar').className = 'server-bar server-off';
+        document.getElementById('backendStatus').textContent = '未配置';
+        return;
+    }
+    fetch(CF_WORKER_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'health' })
+    })
+    .then(function(r){ return r.json(); })
+    .then(function(d) {
+        document.getElementById('serverBar').className = 'server-bar server-ok';
+        document.getElementById('backendStatus').textContent = '✅ 已连接';
+    })
+    .catch(function() {
+        document.getElementById('serverBar').className = 'server-bar server-off';
+        document.getElementById('backendStatus').textContent = '⚠️ 未连接';
+    });
 }
 
 // ============================================================
@@ -309,20 +314,49 @@ function handleFile(file) {
 // AI DETECT COLUMNS
 // ============================================================
 function callDetect(headers, sampleRows, callback) {
-    fetch(API + '/detect_columns', {
+    if (!CF_WORKER_URL) {
+        // No backend - use simple fallback detection
+        callback(simpleDetectColumns(headers, sampleRows));
+        return;
+    }
+    fetch(CF_WORKER_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ headers: headers, sample_rows: sampleRows })
+        body: JSON.stringify({ action: 'detect', headers: headers, sample_rows: sampleRows })
     })
     .then(function(r) { return r.json(); })
     .then(function(data) {
-        if (data.success) {
+        if (data.success && data.mapping) {
             callback(data.mapping);
         } else {
-            callback(null);
+            callback(simpleDetectColumns(headers, sampleRows));
         }
     })
-    .catch(function() { callback(null); });
+    .catch(function() { callback(simpleDetectColumns(headers, sampleRows)); });
+}
+
+function simpleDetectColumns(headers, sampleRows) {
+    // Fallback: simple rule-based detection
+    var dateCol = null, timeCol = null, revCol = null;
+    var dateKws = ['日期','date','day','消费日期','营业日','销售日期'];
+    var timeKws = ['时段','time','range','早','中','晚','夜','班','shift'];
+    var revKws = ['营业额','营收','收入','金额','实收','流水','销售','消费'];
+
+    for (var i = 0; i < headers.length; i++) {
+        var h = headers[i].toLowerCase();
+        if (!dateCol && dateKws.some(function(k){ return h.includes(k); })) dateCol = headers[i];
+        if (!timeCol && timeKws.some(function(k){ return h.includes(k); })) timeCol = headers[i];
+        if (!revCol && revKws.some(function(k){ return h.includes(k); })) revCol = headers[i];
+    }
+    if (!revCol) {
+        for (var i = 0; i < headers.length; i++) {
+            var sample = sampleRows[0] && sampleRows[0][i];
+            if (typeof sample === 'number' && sample > 0 && sample < 10000000) {
+                revCol = headers[i]; break;
+            }
+        }
+    }
+    return { date_col: dateCol, time_col: timeCol, revenue_col: revCol };
 }
 
 // ============================================================
@@ -564,25 +598,34 @@ function runAI() {
     body.innerHTML = '<div class="ai-loading"><div class="ai-spinner"></div> 正在生成分析...</div>';
 
     var stats = { this_week: thisWeekData, last_week: lastWeekData, growth: lastWeekData > 0 ? (((thisWeekData-lastWeekData)/lastWeekData)*100).toFixed(1) : '0', daily_avg: Object.keys(dailyData).length > 0 ? thisWeekData/Object.keys(dailyData).length : 0, peak_time: getPeak().time, peak_revenue: getPeak().rev };
-    var payload = { stats: stats, daily: dailyData, time_ranges: timeRangeData, weeks: groupByWeek() };
 
-    fetch(API + '/analyze', {
+    if (!CF_WORKER_URL) {
+        // No backend - show placeholder message
+        setTimeout(function() {
+            body.innerHTML = '<div class="ai-placeholder"><div class="ai-placeholder-icon">⚠️</div><div>AI后端未配置<br><small>请先部署 Cloudflare Worker 后端</small></div></div>';
+            btn.disabled = false;
+            btn.innerHTML = '<span>✨</span> 重新生成';
+        }, 500);
+        return;
+    }
+
+    fetch(CF_WORKER_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({ action: 'analyze', stats: stats, daily: dailyData, time_ranges: timeRangeData, weeks: groupByWeek() })
     })
     .then(function(r){ return r.json(); })
     .then(function(data) {
         if (data.success && data.reply) {
             body.innerHTML = '<div class="ai-text">'+data.reply.replace(/\n/g, '<br>')+'</div>';
         } else {
-            body.innerHTML = '<div class="ai-placeholder"><div class="ai-placeholder-icon">⚠️</div><div>AI分析失败<br><small>'+(data.error||'未知错误')+'</small></div></div>';
+            body.innerHTML = '<div class="ai-placeholder"><div class="ai-placeholder-icon">⚠️</div><div>AI分析失败<br><small>'+(data.error||'请先配置Cloudflare Worker')+'</small></div></div>';
         }
         btn.disabled = false;
         btn.innerHTML = '<span>✨</span> 重新生成';
     })
     .catch(function(err) {
-        body.innerHTML = '<div class="ai-placeholder"><div class="ai-placeholder-icon">⚠️</div><div>网络错误，AI分析不可用<br><small>请确保服务器正在运行（python3 server.py）</small></div></div>';
+        body.innerHTML = '<div class="ai-placeholder"><div class="ai-placeholder-icon">⚠️</div><div>网络错误<br><small>Cloudflare Worker未部署或不可用</small></div></div>';
         btn.disabled = false;
         btn.innerHTML = '<span>✨</span> 重新生成';
     });
@@ -592,8 +635,8 @@ function getPeak() { var p={time:'-',rev:0}; Object.keys(timeRangeData).forEach(
 // ============================================================
 // INIT
 // ============================================================
-checkServer();
-setInterval(checkServer, 8000);
+checkBackend();
+setInterval(checkBackend, 8000);
 </script>
 </body>
 </html>
