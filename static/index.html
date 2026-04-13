@@ -539,7 +539,7 @@ function groupByWeek() {
     return r;
 }
 
-functionrenderTable() {
+function renderTable() {
     var tbody = document.getElementById('tableBody');
     var sorted = [...rawData].sort(function(a,b){return b.date.localeCompare(a.date);});
     tbody.innerHTML = sorted.map(function(row){
