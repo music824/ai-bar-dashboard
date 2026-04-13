@@ -1,18 +1,17 @@
 /**
- * Cloudflare Worker - AI Bar Dashboard Backend
- * 使用 Cloudflare Workers AI（免费，无需 API Key）
+ * Cloudflare Worker - AI Bar Dashboard (Pure fetch, no Workers AI binding needed)
  * 
- * 部署步骤：
- * 1. 打开 https://dash.cloudflare.com
- * 2. 左侧 Workers & Pages → Create Application → Create Worker
- * 3. 删除默认代码，粘贴本文件全部内容
- * 4. 点 Deploy
- * 5. 复制 Worker URL（如 https://xxx.your-subdomain.workers.dev）
+ * Deploy: dash.cloudflare.com → Workers & Pages → Create Worker → Paste this → Deploy
+ * Then set secret: GROQ_API_KEY (optional, or use built-in llama)
  */
 
+const GROQ_API_KEY = '';
+const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
+const MODEL = 'llama-3.3-70b-versatile';
+
 export default {
-  async fetch(request, env, ctx) {
-    // CORS
+  async fetch(request) {
+    // CORS preflight
     if (request.method === 'OPTIONS') {
       return new Response(null, {
         headers: {
@@ -24,7 +23,9 @@ export default {
     }
 
     if (request.method !== 'POST') {
-      return new Response('Method Not Allowed', { status: 405 });
+      return new Response(JSON.stringify({ status: 'ok', message: 'AI Bar Dashboard Worker v2' }), {
+        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+      });
     }
 
     try {
@@ -32,75 +33,54 @@ export default {
       const { action, headers, sample_rows, stats, daily, time_ranges, weeks } = body;
 
       if (action === 'detect') {
-        // AI 列识别
-        const sampleText = `表头: ${JSON.stringify(headers)}\n\n前10行数据:\n` +
-          sample_rows.slice(0, 10).map((row, i) => `行${i+1}: ${JSON.stringify(row.map(c => String(c||'').trim()))}`).join('\n');
+        // Column detection
+        const sampleText = 'Headers: ' + JSON.stringify(headers) + '\n\nSample rows:\n' +
+          sample_rows.slice(0, 10).map((row, i) => 'Row' + (i+1) + ': ' + JSON.stringify(row.map(c => String(c||'').trim()))).join('\n');
 
-        const prompt = `你是一个Excel数据解析助手。用户上传了酒吧/门店的营业数据Excel。
+        const userPrompt = 'You are an Excel data parser. User uploaded a bar/night club revenue Excel with unknown format.\n\n' + sampleText + '\n\nReturn ONLY valid JSON (no other text):\n{"date_col": "column name or null", "time_col": "column name or null", "revenue_col": "column name or null"}';
 
-表头和数据样本：
-${sampleText}
+        let reply;
+        if (GROQ_API_KEY) {
+          reply = await callGroq(userPrompt, 'You are an Excel data parser. Return ONLY JSON.', 150);
+        } else {
+          // Fallback: simple rule-based detection (no API needed)
+          reply = JSON.stringify(simpleDetect(headers, sample_rows));
+        }
 
-请分析后返回JSON格式，告诉我哪列是日期、哪列是时段（可能没有）、哪列是金额。只返回JSON：
-{"date_col": "列名", "time_col": "列名或null", "revenue_col": "列名"}`;
-
-        const aiResponse = await env.AI.run('@cf/meta/llama-3-8b-instruct', {
-          messages: [
-            { role: 'system', content: '你是一个专业的Excel数据解析助手。只返回JSON格式，不要其他文字。' },
-            { role: 'user', content: prompt }
-          ],
-          max_tokens: 200,
-          temperature: 0.1
-        });
-
-        const reply = aiResponse.choices?.[0]?.message?.content || '';
         const jsonMatch = reply.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
           return new Response(JSON.stringify({ success: true, mapping: JSON.parse(jsonMatch[0]) }), {
             headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
           });
         }
-        return new Response(JSON.stringify({ success: false, error: '无法解析AI响应', raw: reply }), {
+        return new Response(JSON.stringify({ success: false, error: 'Cannot parse AI response', raw: reply }), {
           headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
         });
 
       } else if (action === 'analyze') {
-        // AI 分析建议
-        const dailyLines = Object.entries(daily||{}).sort().map(([d,v]) => `${d}: ¥${v.toLocaleString()}`).join('\n');
-        const timeLines = Object.entries(time_ranges||{}).sort((a,b)=>b[1]-a[1]).map(([t,v]) => `${t}: ¥${v.toLocaleString()}`).join('\n');
-        const weekLines = Object.entries(weeks||{}).sort().slice(-6).map(([w,v]) => `${w}: ¥${v.toLocaleString()}`).join('\n');
+        // Business analysis
+        const dailyLines = Object.entries(daily||{}).sort().map(([d,v]) => d + ': $' + v.toLocaleString()).join('\n');
+        const timeLines = Object.entries(time_ranges||{}).sort((a,b) => b[1]-a[1]).map(([t,v]) => t + ': $' + v.toLocaleString()).join('\n');
+        const weekLines = Object.entries(weeks||{}).sort().slice(-6).map(([w,v]) => w + ': $' + v.toLocaleString()).join('\n');
 
-        const prompt = `你是专业的酒吧经营数据分析顾问，用中文分析数据并给出可执行的建议。
+        const userPrompt = 'You are a professional bar数据分析顾问. Analyze this data and give actionable advice in Chinese.\n\n' +
+          'Core: ThisWeek=$' + (stats?.this_week||0).toLocaleString() + ' (growth:' + (stats?.growth||0) + '%), LastWeek=$' + (stats?.last_week||0).toLocaleString() +
+          ', DailyAvg=$' + (stats?.daily_avg||0).toLocaleString() + ', Peak:' + (stats?.peak_time||'-') + '($"' + (stats?.peak_revenue||0).toLocaleString() + ')\n\n' +
+          'Daily:\n' + (dailyLines||'N/A') + '\n\nTimeRanges:\n' + (timeLines||'N/A') + '\n\nWeeks:\n' + (weekLines||'N/A') + '\n\nReply in Chinese, concise, use emoji, cover: 1)本周评估 2)时段建议 3)下周行动.';
 
-核心数据：本周¥${(stats?.this_week||0).toLocaleString()}（环比${stats?.growth||0}%）vs上周¥${(stats?.last_week||0).toLocaleString()}，日均¥${(stats?.daily_avg||0).toLocaleString()}，高峰${stats?.peak_time||'-'}(¥${(stats?.peak_revenue||0).toLocaleString()})
+        let reply;
+        if (GROQ_API_KEY) {
+          reply = await callGroq(userPrompt, '你是专业酒吧经营数据分析顾问，用中文回复。', 600);
+        } else {
+          reply = simpleAnalysis(stats, daily, time_ranges);
+        }
 
-每日营业额：
-${dailyLines||'暂无'}
-
-时段分布：
-${timeLines||'暂无'}
-
-近周对比：
-${weekLines||'暂无'}
-
-请从：1)本周评估 2)时段建议 3)下周行动 三个维度用中文简洁回答，重点用emoji标注。`;
-
-        const aiResponse = await env.AI.run('@cf/meta/llama-3-8b-instruct', {
-          messages: [
-            { role: 'system', content: '你是一位专业的酒吧经营数据分析顾问，用中文回复，语言简洁专业，数据驱动，重点突出。' },
-            { role: 'user', content: prompt }
-          ],
-          max_tokens: 800,
-          temperature: 0.7
-        });
-
-        const reply = aiResponse.choices?.[0]?.message?.content || 'AI暂时不可用，请稍后重试。';
         return new Response(JSON.stringify({ success: true, reply }), {
           headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
         });
       }
 
-      return new Response(JSON.stringify({ error: 'Unknown action' }), {
+      return new Response(JSON.stringify({ error: 'Unknown action: ' + action }), {
         status: 400,
         headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
       });
@@ -113,3 +93,77 @@ ${weekLines||'暂无'}
     }
   }
 };
+
+// ========== Groq API ==========
+async function callGroq(userPrompt, systemPrompt, maxTokens) {
+  const resp = await fetch(GROQ_URL, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + GROQ_API_KEY,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ],
+      temperature: 0.7,
+      max_tokens: maxTokens
+    })
+  });
+  const data = await resp.json();
+  return data.choices?.[0]?.message?.content || '';
+}
+
+// ========== Fallback: Simple Rule-Based Detection ==========
+function simpleDetect(headers, sampleRows) {
+  var dateCol = null, timeCol = null, revCol = null;
+  var dateKws = ['日期','date','day','消费日期','营业日','销售日期','时间'];
+  var timeKws = ['时段','time','range','早','中','晚','夜','班','shift','场'];
+  var revKws = ['营业额','营收','收入','金额','实收','流水','销售','消费','cash','sales'];
+
+  for (var i = 0; i < headers.length; i++) {
+    var h = headers[i].toLowerCase();
+    if (!dateCol && dateKws.some(function(k){ return h.indexOf(k) !== -1; })) dateCol = headers[i];
+    if (!timeCol && timeKws.some(function(k){ return h.indexOf(k) !== -1; })) timeCol = headers[i];
+    if (!revCol && revKws.some(function(k){ return h.indexOf(k) !== -1; })) revCol = headers[i];
+  }
+  if (!revCol) {
+    for (var i = 0; i < headers.length; i++) {
+      var sample = sampleRows[0] && sampleRows[0][i];
+      if (typeof sample === 'number' && sample > 0 && sample < 10000000) {
+        revCol = headers[i]; break;
+      }
+      var s = String(sample||'');
+      var num = parseFloat(s.replace(/[^0-9.]/g,''));
+      if (num > 100 && num < 10000000) { revCol = headers[i]; break; }
+    }
+  }
+  return { date_col: dateCol, time_col: timeCol, revenue_col: revCol };
+}
+
+// ========== Fallback: Simple Analysis (no API needed) ==========
+function simpleAnalysis(stats, daily, time_ranges) {
+  var growth = parseFloat(stats?.growth || 0);
+  var peakT = stats?.peak_time || '-';
+  var peakR = stats?.peak_revenue || 0;
+  var dailyAvg = stats?.daily_avg || 0;
+
+  var advice = '';
+  if (growth >= 20) {
+    advice += '📈 本周表现优秀！营业额环比增长 +' + growth + '%，继续保持！\n\n';
+  } else if (growth >= 0) {
+    advice += '📊 本周稳定持平，环比 +' + growth + '%。\n\n';
+  } else {
+    advice += '⚠️ 本周下滑 ' + Math.abs(growth) + '%，建议关注高峰时段「' + peakT + '」的服务质量。\n\n';
+  }
+
+  advice += '⏰ 时段分析：' + peakT + ' 是高峰时段，建议加强该时段人员配置和活动策划。\n\n';
+  advice += '🚀 下周建议：\n';
+  advice += '1. 制定高峰时段专属促销方案\n';
+  advice += '2. 关注日均 ¥' + Math.round(dailyAvg).toLocaleString() + '，提升空间大\n';
+  advice += '3. 每周复盘，持续跟踪数据变化';
+
+  return advice;
+}
