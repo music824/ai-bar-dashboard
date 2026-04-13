@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🍸 AI酒吧数据分析平台</title>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root { --bg:#0a0a0a; --bg2:#111; --bg3:#1a1a1a; --border:rgba(255,255,255,0.06); --blue:#4a9eff; --orange:#ff6b35; --green:#00c853; --red:#ff5252; --text:#fff; --text2:#8a8a8a; }
+        body { font-family: 'Noto Sans SC', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+        .header { background: rgba(10,10,10,0.95); backdrop-filter: blur(20px); border-bottom: 1px solid var(--border); padding: 0 32px; height: 64px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; }
+        .header-logo { font-size: 18px; font-weight: 700; background: linear-gradient(135deg, var(--blue), var(--orange)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .header-right { display: flex; align-items: center; gap: 12px; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); animation: pulse 2s infinite; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+        .status-text { font-size: 12px; color: var(--text2); }
+        .status-warn { color: var(--orange) !important; }
+        .container { max-width: 1100px; margin: 0 auto; padding: 32px 24px 80px; }
+
+        .server-bar { background: rgba(74,158,255,0.08); border: 1px solid rgba(74,158,255,0.2); border-radius: 12px; padding: 14px 18px; margin-bottom: 24px; display: flex; align-items: center; gap: 12px; font-size: 13px; }
+        .server-bar .label { color: var(--blue); font-weight: 600; }
+        .server-bar .cmd { background: var(--bg2); padding: 6px 14px; border-radius: 8px; font-family: monospace; font-size: 12px; color: #fff; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .server-ok { background: rgba(0,200,83,0.08); border-color: rgba(0,200,83,0.2); }
+        .server-ok .status-dot { background: var(--green); }
+        .server-off { background: rgba(255,107,53,0.08); border-color: rgba(255,107,53,0.2); }
+        .server-off .status-dot { background: var(--orange); box-shadow: 0 0 8px var(--orange); }
+
+        .upload-area { background: var(--bg3); border: 2px dashed rgba(74,158,255,0.3); border-radius: 20px; padding: 52px 40px; text-align: center; margin-bottom: 28px; cursor: pointer; transition: all 0.3s; }
+        .upload-area:hover, .upload-area.dragover { border-color: var(--blue); background: rgba(74,158,255,0.05); }
+        .upload-icon { font-size: 52px; margin-bottom: 16px; }
+        .upload-title { font-size: 20px; font-weight: 700; margin-bottom: 8px; }
+        .upload-desc { font-size: 14px; color: var(--text2); margin-bottom: 20px; }
+        .upload-btn { display: inline-flex; align-items: center; gap: 8px; background: linear-gradient(135deg, var(--blue), var(--orange)); color: white; border: none; padding: 12px 28px; border-radius: 30px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; transition: transform 0.2s; }
+        .upload-btn:hover { transform: scale(1.05); }
+        .upload-hint { font-size: 11px; color: var(--text2); margin-top: 12px; }
+        #fileInput { display: none; }
+
+        .ai-parse-panel { background: var(--bg3); border: 1px solid rgba(74,158,255,0.25); border-radius: 16px; padding: 26px; margin-bottom: 28px; display: none; }
+        .ai-parse-panel.show { display: block; }
+        .ai-parse-header { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+        .ai-parse-title { font-size: 15px; font-weight: 700; color: var(--blue); }
+        .ai-parse-status { font-size: 13px; color: var(--text2); margin-bottom: 14px; }
+        .ai-parse-cols { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+        .col-badge { background: rgba(74,158,255,0.12); border: 1px solid rgba(74,158,255,0.3); color: var(--blue); padding: 5px 14px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+        .col-badge.time { background: rgba(255,107,53,0.12); border-color: rgba(255,107,53,0.3); color: var(--orange); }
+        .col-badge.revenue { background: rgba(0,200,83,0.12); border-color: rgba(0,200,83,0.3); color: var(--green); }
+        .ai-parse-preview { background: var(--bg2); border-radius: 10px; padding: 12px; font-size: 11px; color: var(--text2); max-height: 100px; overflow-y: auto; line-height: 1.8; margin-bottom: 12px; white-space: pre-wrap; font-family: monospace; }
+        .ai-error { color: var(--red); font-size: 13px; }
+        .btn-secondary { background: rgba(74,158,255,0.15); border: 1px solid rgba(74,158,255,0.3); color: var(--blue); padding: 8px 18px; border-radius: 20px; font-size: 13px; cursor: pointer; font-family: inherit; transition: all 0.3s; }
+        .btn-secondary:hover { background: rgba(74,158,255,0.25); }
+
+        .stats-grid { display: none; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 28px; }
+        .stats-grid.show { display: grid; }
+        .stat-card { background: var(--bg3); border: 1px solid var(--border); border-radius: 16px; padding: 20px; }
+        .stat-label { font-size: 11px; color: var(--text2); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 8px; }
+        .stat-value { font-size: 26px; font-weight: 900; margin-bottom: 4px; }
+        .stat-change { font-size: 12px; font-weight: 600; }
+        .stat-change.up { color: var(--green); }
+        .stat-change.down { color: var(--red); }
+        .stat-sub { font-size: 11px; color: var(--text2); }
+
+        .section { margin-bottom: 28px; display: none; }
+        .section.show { display: block; }
+        .section-title { font-size: 15px; font-weight: 700; margin-bottom: 14px; padding-bottom: 8px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+        .section-title::before { content: ''; width: 4px; height: 16px; background: linear-gradient(180deg, var(--blue), var(--orange)); border-radius: 2px; }
+
+        .charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 14px; }
+        @media (max-width:480px) { .charts-grid { grid-template-columns: 1fr; } }
+        .chart-card { background: var(--bg3); border: 1px solid var(--border); border-radius: 16px; padding: 20px; }
+        .chart-wrap { position: relative; height: 250px; }
+        .chart-wrap canvas { width: 100% !important; height: 100% !important; }
+
+        .ai-panel { background: var(--bg3); border: 1px solid rgba(74,158,255,0.2); border-radius: 16px; overflow: hidden; }
+        .ai-header { background: linear-gradient(135deg, rgba(74,158,255,0.1), rgba(255,107,53,0.1)); padding: 16px 22px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+        .ai-title { font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+        .ai-badge { background: linear-gradient(135deg, var(--blue), var(--orange)); color: white; font-size: 10px; padding: 2px 8px; border-radius: 10px; font-weight: 600; }
+        .ai-btn { display: flex; align-items: center; gap: 6px; background: linear-gradient(135deg, var(--blue), var(--orange)); color: white; border: none; padding: 10px 22px; border-radius: 20px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; transition: all 0.3s; }
+        .ai-btn:hover { transform: scale(1.05); box-shadow: 0 4px 20px rgba(74,158,255,0.4); }
+        .ai-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+        .ai-body { padding: 22px; min-height: 180px; }
+        .ai-placeholder { text-align: center; padding: 36px; color: var(--text2); }
+        .ai-placeholder-icon { font-size: 36px; margin-bottom: 10px; }
+        .ai-text { font-size: 14px; line-height: 1.85; white-space: pre-wrap; }
+        .ai-loading { display: flex; align-items: center; gap: 10px; color: var(--text2); font-size: 14px; padding: 20px 0; }
+        .ai-spinner { width: 20px; height: 20px; border: 2px solid var(--bg2); border-top-color: var(--blue); border-radius: 50%; animation: spin 0.8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .table-wrap { overflow-x: auto; }
+        .data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .data-table th { background: var(--bg2); padding: 10px 14px; text-align: left; font-weight: 600; color: var(--text2); border-bottom: 1px solid var(--border); white-space: nowrap; }
+        .data-table td { padding: 10px 14px; border-bottom: 1px solid var(--border); }
+        .data-table tr:hover td { background: rgba(74,158,255,0.04); }
+        .data-table .num { font-variant-numeric: tabular-nums; text-align: right; }
+
+        .loading-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 200; align-items: center; justify-content: center; }
+        .loading-overlay.show { display: flex; }
+        .loading-box { background: var(--bg3); border: 1px solid rgba(74,158,255,0.3); border-radius: 20px; padding: 36px 48px; text-align: center; max-width: 400px; }
+        .loading-spinner { width: 40px; height: 40px; border: 3px solid var(--bg2); border-top-color: var(--blue); border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 16px; }
+        .loading-title { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
+        .loading-desc { font-size: 13px; color: var(--text2); line-height: 1.6; }
+        .loading-step { margin-top: 10px; font-size: 12px; color: var(--blue); }
+
+        @media (max-width:768px) { .container{padding:20px 16px 60px} .header{padding:0 16px} .stats-grid{grid-template-columns:1fr 1fr} .upload-area{padding:32px 20px} }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <div class="header-logo">🍸 AI酒吧数据分析平台</div>
+    <div class="header-right">
+        <div class="status-dot" id="serverDot"></div>
+        <span class="status-text" id="serverStatus">检查服务器...</span>
+    </div>
+</div>
+
+<div class="loading-overlay" id="loadingOverlay">
+    <div class="loading-box">
+        <div class="loading-spinner"></div>
+        <div class="loading-title" id="loadingTitle">AI智能解析中</div>
+        <div class="loading-desc" id="loadingDesc">正在分析Excel结构...</div>
+        <div class="loading-step" id="loadingStep"></div>
+    </div>
+</div>
+
+<div class="container">
+
+    <!-- Server status bar -->
+    <div class="server-bar server-off" id="serverBar">
+        <div class="label">后端服务</div>
+        <div class="cmd" id="serverCmd">python3 server.py</div>
+        <div style="font-size:12px;color:var(--text2)">→ 终端运行</div>
+    </div>
+
+    <!-- Upload -->
+    <div class="upload-area" id="uploadArea" onclick="document.getElementById('fileInput').click()">
+        <div class="upload-icon">📊</div>
+        <div class="upload-title">上传Excel数据文件</div>
+        <div class="upload-desc">支持任意格式 · AI自动识别列 · 无需模板</div>
+        <button class="upload-btn" type="button">📂 选择文件</button>
+        <div class="upload-hint">拖拽文件到此处 · 支持 .xls / .xlsx</div>
+        <input type="file" id="fileInput" accept=".xls,.xlsx" onchange="handleFile(this.files[0])">
+    </div>
+
+    <!-- AI Column Detection -->
+    <div class="ai-parse-panel" id="parsePanel">
+        <div class="ai-parse-header">
+            <div class="ai-parse-title">🧠 AI已识别列结构</div>
+        </div>
+        <div class="ai-parse-status" id="parseStatus">识别完成</div>
+        <div class="ai-parse-cols" id="colBadges"></div>
+        <div class="ai-parse-preview" id="parsePreview"></div>
+        <div id="parseError" class="ai-error"></div>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats-grid" id="statsGrid">
+        <div class="stat-card">
+            <div class="stat-label">本周营业额</div>
+            <div class="stat-value" style="color:var(--blue)" id="sThisWeek">-</div>
+            <div class="stat-change up" id="sGrowth">-</div>
+            <div class="stat-sub">vs 上周</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">上周营业额</div>
+            <div class="stat-value" style="color:var(--text2)" id="sLastWeek">-</div>
+            <div class="stat-sub">上周数据</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">本月日均</div>
+            <div class="stat-value" style="color:var(--orange)" id="sDailyAvg">-</div>
+            <div class="stat-sub">每日平均</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">高峰时段</div>
+            <div class="stat-value" style="font-size:20px" id="sPeakTime">-</div>
+            <div class="stat-sub" id="sPeakRev">-</div>
+        </div>
+    </div>
+
+    <!-- Charts -->
+    <div class="section" id="chartsSection">
+        <div class="section-title">数据可视化</div>
+        <div class="charts-grid">
+            <div class="chart-card"><div class="chart-wrap"><canvas id="lineChart"></canvas></div></div>
+            <div class="chart-card"><div class="chart-wrap"><canvas id="barChart"></canvas></div></div>
+            <div class="chart-card"><div class="chart-wrap"><canvas id="compareChart"></canvas></div></div>
+        </div>
+    </div>
+
+    <!-- AI Analysis -->
+    <div class="section" id="aiSection">
+        <div class="section-title">AI智能分析建议</div>
+        <div class="ai-panel">
+            <div class="ai-header">
+                <div class="ai-title">🤖 AI经营分析 <span class="ai-badge">Powered by DeepSeek</span></div>
+                <button class="ai-btn" id="aiBtn" onclick="runAI()"><span>✨</span> 生成AI分析</button>
+            </div>
+            <div class="ai-body" id="aiBody">
+                <div class="ai-placeholder">
+                    <div class="ai-placeholder-icon">🧠</div>
+                    <div>上传数据后，点击上方按钮<br>AI将根据你的真实数据生成个性化经营建议</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Data Table -->
+    <div class="section" id="tableSection">
+        <div class="section-title">原始数据</div>
+        <div class="chart-card">
+            <div class="table-wrap">
+                <table class="data-table"><thead><tr><th>日期</th><th>时间段</th><th>营业额(元)</th></tr></thead><tbody id="tableBody"></tbody></table>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+var API = ''; // empty = same origin (when served by Flask)
+var rawData = [], dailyData = {}, timeRangeData = {}, thisWeekData = 0, lastWeekData = 0;
+var charts = {};
+var parsedMapping = null;
+
+// ============================================================
+// SERVER CHECK
+// ============================================================
+function checkServer() {
+    fetch(API + '/health')
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            if (d.status === 'ok') {
+                document.getElementById('serverBar').className = 'server-bar server-ok';
+                document.getElementById('serverStatus').textContent = '已连接';
+                document.getElementById('serverStatus').className = 'status-text';
+            }
+        })
+        .catch(function() {
+            document.getElementById('serverBar').className = 'server-bar server-off';
+            document.getElementById('serverStatus').textContent = '服务器未运行';
+            document.getElementById('serverStatus').className = 'status-text status-warn';
+        });
+}
+
+// ============================================================
+// FILE UPLOAD
+// ============================================================
+var uploadArea = document.getElementById('uploadArea');
+uploadArea.addEventListener('dragover', function(e){ e.preventDefault(); uploadArea.classList.add('dragover'); });
+uploadArea.addEventListener('dragleave', function(){ uploadArea.classList.remove('dragover'); });
+uploadArea.addEventListener('drop', function(e){
+    e.preventDefault(); uploadArea.classList.remove('dragover');
+    var f = e.dataTransfer.files[0];
+    if (f) handleFile(f);
+});
+
+function handleFile(file) {
+    if (!file) return;
+    showLoading('读取文件中', '正在解析Excel...', '');
+
+    var reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            var data = new Uint8Array(e.target.result);
+            var wb = XLSX.read(data, { type: 'array', cellDates: true });
+            var sheet = wb.Sheets[wb.SheetNames[0]];
+            // Read with headers
+            var json = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+
+            if (!json || json.length < 2) {
+                hideLoading(); alert('Excel为空'); return;
+            }
+
+            var headers = json[0].map(function(h){ return String(h||'').trim(); });
+            var dataRows = json.slice(1).filter(function(r){ return r.some(function(c){ return c !== '' && c != null; }); });
+
+            if (dataRows.length === 0) {
+                hideLoading(); alert('没有数据行'); return;
+            }
+
+            // Send to AI for column detection
+            updateLoading('AI正在识别列结构', '分析表头和数据样本...', '步骤 1/2');
+            callDetect(headers, dataRows.slice(0, 10), function(mapping) {
+                if (!mapping) {
+                    hideLoading();
+                    showParseError('AI无法识别列结构。请确保Excel包含日期列和金额列。');
+                    return;
+                }
+                parsedMapping = mapping;
+                showParsePanel(headers, dataRows, mapping);
+                parseFullData(headers, dataRows, mapping);
+                renderAll();
+                hideLoading();
+                document.getElementById('uploadArea').style.display = 'none';
+            });
+
+        } catch(err) {
+            hideLoading(); console.error(err); alert('解析出错：' + err.message);
+        }
+    };
+    reader.readAsArrayBuffer(file);
+}
+
+// ============================================================
+// AI DETECT COLUMNS
+// ============================================================
+function callDetect(headers, sampleRows, callback) {
+    fetch(API + '/detect_columns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ headers: headers, sample_rows: sampleRows })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.success) {
+            callback(data.mapping);
+        } else {
+            callback(null);
+        }
+    })
+    .catch(function() { callback(null); });
+}
+
+// ============================================================
+// PARSE DATA
+// ============================================================
+function parseFullData(headers, allRows, mapping) {
+    rawData = [];
+    var dateIdx = -1, timeIdx = -1, revIdx = -1;
+
+    // Find column indices by name
+    headers.forEach(function(h, i) {
+        var hn = h.toLowerCase();
+        if (mapping.date_col && hn === mapping.date_col.toLowerCase()) dateIdx = i;
+        if (mapping.time_col && hn === mapping.time_col.toLowerCase()) timeIdx = i;
+        if (mapping.revenue_col && hn === mapping.revenue_col.toLowerCase()) revIdx = i;
+    });
+
+    // Fallback: try "contains" match
+    if (dateIdx < 0) {
+        headers.forEach(function(h, i) {
+            if (dateIdx < 0 && /日期|date|day|消费|营业日|销售日期/.test(h)) dateIdx = i;
+            if (timeIdx < 0 && /时段|time|早|中|晚|夜|班|shift/.test(h)) timeIdx = i;
+            if (revIdx < 0 && /营业额|营收|收入|金额|实收|流水|销售|消费/.test(h)) revIdx = i;
+        });
+    }
+
+    if (dateIdx < 0 || revIdx < 0) {
+        // Try by content pattern
+        for (var c = 0; c < headers.length; c++) {
+            var sample = allRows[0] && allRows[0][c];
+            if (dateIdx < 0 && isDateLike(sample)) dateIdx = c;
+            if (revIdx < 0 && isRevenueLike(sample)) revIdx = c;
+        }
+    }
+
+    if (dateIdx < 0 || revIdx < 0) {
+        showParseError('未能找到日期列(dateIdx=' + dateIdx + ')或金额列(revIdx=' + revIdx + ')，表头：' + JSON.stringify(headers));
+        return;
+    }
+
+    allRows.forEach(function(row) {
+        var dateStr = normalizeDate(row[dateIdx]);
+        var timeStr = timeIdx >= 0 ? String(row[timeIdx]||'').trim() : '';
+        var revenue = parseRevenue(row[revIdx]);
+        if (dateStr && revenue > 0) {
+            rawData.push({ date: dateStr, timeRange: timeStr, revenue: revenue });
+        }
+    });
+
+    computeStats();
+}
+
+function isDateLike(v) {
+    if (!v) return false;
+    var s = String(v);
+    return /^\\d{4}[-/]\\d{1,2}[-/]\\d{1,2}/.test(s) || /\\d{4}年/.test(s) || /^\\d{1,2}\\/\\d{1,2}\\/\\d{2,4}/.test(s);
+}
+
+function isRevenueLike(v) {
+    if (typeof v === 'number') return v > 0 && v < 10000000;
+    if (!v) return false;
+    var s = String(v);
+    var num = parseFloat(s.replace(/[^0-9.]/g, ''));
+    return num > 0 && num < 10000000;
+}
+
+function normalizeDate(val) {
+    if (!val && val !== 0) return null;
+    if (typeof val === 'number' && val > 25000 && val < 60000) {
+        return new Date((val - 25569) * 86400 * 1000).toISOString().split('T')[0];
+    }
+    if (Object.prototype.toString.call(val) === '[object Date]') {
+        return val.toISOString().split('T')[0];
+    }
+    var str = String(val).trim();
+    if (/^\\d{4}-\\d{2}-\\d{2}/.test(str)) return str.slice(0,10);
+    if (/^\\d{4}\\/\\d{2}\\/\\d{2}/.test(str)) return str.slice(0,10).replace(/\\//g, '-');
+    var cn = str.match(/(\\d{4})年(\\d{1,2})月(\\d{1,2})日/);
+    if (cn) return cn[1]+'-'+cn[2].padStart(2,'0')+'-'+cn[3].padStart(2,'0');
+    var sl = str.match(/^(\\d{1,2})\\/(\\d{1,2})\\/(\\d{2,4})$/);
+    if (sl) {
+        var y = sl[3].padStart(4,'20');
+        return parseInt(sl[1]) > 12 ? y+'-'+sl[2].padStart(2,'0')+'-'+sl[1].padStart(2,'0') : y+'-'+sl[1].padStart(2,'0')+'-'+sl[2].padStart(2,'0');
+    }
+    return null;
+}
+
+function parseRevenue(val) {
+    if (typeof val === 'number') return val > 0 ? val : 0;
+    if (!val) return 0;
+    var num = parseFloat(String(val).replace(/[^0-9.]/g, ''));
+    return isNaN(num) ? 0 : num;
+}
+
+function computeStats() {
+    dailyData = {}; timeRangeData = {}; var weekData = {};
+    rawData.forEach(function(r) {
+        dailyData[r.date] = (dailyData[r.date]||0) + r.revenue;
+        if (r.timeRange) timeRangeData[r.timeRange] = (timeRangeData[r.timeRange]||0) + r.revenue;
+        var dt = new Date(r.date);
+        var w = dt.getFullYear()+'-W'+String(getISOWeek(dt)).padStart(2,'0');
+        weekData[w] = (weekData[w]||0) + r.revenue;
+    });
+    var wk = Object.keys(weekData).sort();
+    thisWeekData = wk.length > 0 ? weekData[wk[wk.length-1]] : 0;
+    lastWeekData = wk.length > 1 ? weekData[wk[wk.length-2]] : 0;
+    var days = Object.keys(dailyData).length;
+    var peakT = '', peakR = 0;
+    Object.keys(timeRangeData).forEach(function(t){ if(timeRangeData[t]>peakR){peakR=timeRangeData[t];peakT=t;} });
+    var growth = lastWeekData > 0 ? (((thisWeekData-lastWeekData)/lastWeekData)*100).toFixed(1) : '0';
+    document.getElementById('sThisWeek').textContent = '¥'+fmt(thisWeekData);
+    document.getElementById('sLastWeek').textContent = '¥'+fmt(lastWeekData);
+    document.getElementById('sDailyAvg').textContent = '¥'+fmt(days>0?thisWeekData/days:0);
+    document.getElementById('sPeakTime').textContent = peakT||'-';
+    document.getElementById('sPeakRev').textContent = peakR>0?'¥'+fmt(peakR):'-';
+    var gEl = document.getElementById('sGrowth');
+    if (growth>=0) { gEl.textContent='↑ +'+growth+'%'; gEl.className='stat-change up'; }
+    else { gEl.textContent='↓ '+growth+'%'; gEl.className='stat-change down'; }
+}
+
+function getISOWeek(date) {
+    var d = new Date(Date.UTC(date.getFullYear(),date.getMonth(),date.getDate()));
+    var dn = d.getUTCDay()||7; d.setUTCDate(d.getUTCDate()+4-dn);
+    var ys = new Date(Date.UTC(d.getUTCFullYear(),0,1));
+    return Math.ceil((((d-ys)/86400000)+1)/7);
+}
+
+function fmt(n) {
+    if (n>=10000) return (n/10000).toFixed(1)+'万';
+    return n.toLocaleString('zh-CN',{maximumFractionDigits:0});
+}
+
+// ============================================================
+// RENDER
+// ============================================================
+function renderAll() {
+    document.getElementById('statsGrid').classList.add('show');
+    document.getElementById('chartsSection').classList.add('show');
+    document.getElementById('aiSection').classList.add('show');
+    document.getElementById('tableSection').classList.add('show');
+    document.getElementById('statusText').textContent = '✅ 已加载 '+rawData.length+' 条数据';
+    renderCharts();
+    renderTable();
+}
+
+function renderCharts() {
+    var sorted = Object.keys(dailyData).sort();
+    var lCtx = document.getElementById('lineChart').getContext('2d');
+    if (charts.line) charts.line.destroy();
+    charts.line = new Chart(lCtx, {
+        type: 'line',
+        data: { labels: sorted.map(function(d){return d.slice(5);}), datasets: [{ label:'营业额', data:sorted.map(function(d){return dailyData[d];}), borderColor:'#4a9eff', backgroundColor:'rgba(74,158,255,0.1)', borderWidth:2.5, pointRadius:4, pointBackgroundColor:'#4a9eff', tension:0.4, fill:true }] },
+        options: chartOpts()
+    });
+    var bCtx = document.getElementById('barChart').getContext('2d');
+    if (charts.bar) charts.bar.destroy();
+    var tSorted = Object.keys(timeRangeData).sort();
+    charts.bar = new Chart(bCtx, {
+        type: 'bar',
+        data: { labels: tSorted, datasets: [{ label:'营业额', data:tSorted.map(function(t){return timeRangeData[t];}), backgroundColor:tSorted.map(function(t){return /21|22|23|24/.test(t)?'rgba(255,107,53,0.7)':'rgba(74,158,255,0.6)';}), borderRadius:6, borderSkipped:false }] },
+        options: chartOpts()
+    });
+    var cCtx = document.getElementById('compareChart').getContext('2d');
+    if (charts.compare) charts.compare.destroy();
+    var wd = groupByWeek(), wkeys = Object.keys(wd).sort().slice(-6);
+    charts.compare = new Chart(cCtx, {
+        type: 'bar',
+        data: { labels: wkeys, datasets: [{ label:'周营业额', data:wkeys.map(function(k){return wd[k];}), backgroundColor:wkeys.map(function(k,i){return i===wkeys.length-1?'rgba(74,158,255,0.8)':'rgba(74,158,255,0.3)';}), borderRadius:6 }] },
+        options: chartOpts()
+    });
+}
+
+function chartOpts() {
+    return { responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false}, tooltip:{ backgroundColor:'#1a1a1a', borderColor:'rgba(74,158,255,0.3)', borderWidth:1, titleColor:'#fff', bodyColor:'#8a8a8a', callbacks:{label:function(ctx){return '¥'+ctx.raw.toLocaleString();}} } }, scales:{ x:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#8a8a8a',font:{size:11}}}, y:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#8a8a8a',font:{size:11},callback:function(v){return v>=1000?v/1000+'k':v;}}} } };
+}
+
+function groupByWeek() {
+    var r={};
+    rawData.forEach(function(row){var dt=new Date(row.date);var w=dt.getFullYear()+'-W'+String(getISOWeek(dt)).padStart(2,'0');r[w]=(r[w]||0)+row.revenue;});
+    return r;
+}
+
+functionrenderTable() {
+    var tbody = document.getElementById('tableBody');
+    var sorted = [...rawData].sort(function(a,b){return b.date.localeCompare(a.date);});
+    tbody.innerHTML = sorted.map(function(row){
+        return '<tr><td>'+row.date+'</td><td>'+row.timeRange+'</td><td class="num">¥'+row.revenue.toLocaleString()+'</td></tr>';
+    }).join('');
+}
+
+// ============================================================
+// UI HELPERS
+// ============================================================
+function showLoading(title, desc, step) {
+    document.getElementById('loadingTitle').textContent = title;
+    document.getElementById('loadingDesc').textContent = desc;
+    document.getElementById('loadingStep').textContent = step;
+    document.getElementById('loadingOverlay').classList.add('show');
+}
+function updateLoading(title, desc, step) {
+    document.getElementById('loadingTitle').textContent = title;
+    document.getElementById('loadingDesc').textContent = desc;
+    document.getElementById('loadingStep').textContent = step;
+}
+function hideLoading() { document.getElementById('loadingOverlay').classList.remove('show'); }
+
+function showParsePanel(headers, dataRows, mapping) {
+    var panel = document.getElementById('parsePanel');
+    panel.classList.add('show');
+    document.getElementById('parseStatus').textContent = 'AI已识别以下列结构：';
+    var badges = document.getElementById('colBadges');
+    badges.innerHTML = '';
+    if (mapping.date_col) badges.innerHTML += '<span class="col-badge">📅 日期 → '+mapping.date_col+'</span>';
+    if (mapping.time_col) badges.innerHTML += '<span class="col-badge time">⏰ 时段 → '+mapping.time_col+'</span>';
+    if (mapping.revenue_col) badges.innerHTML += '<span class="col-badge revenue">💰 金额 → '+mapping.revenue_col+'</span>';
+    var preview = document.getElementById('parsePreview');
+    var t = '表头: '+JSON.stringify(headers)+'\n';
+    dataRows.slice(0,5).forEach(function(row,i){ t += '行'+(i+1)+': '+JSON.stringify(row.map(function(c){return String(c||'').trim();}))+'\n'; });
+    preview.textContent = t;
+    document.getElementById('parseError').textContent = '';
+}
+function showParseError(msg) {
+    var panel = document.getElementById('parsePanel');
+    panel.classList.add('show');
+    document.getElementById('parseStatus').textContent = '⚠️ 识别失败';
+    document.getElementById('colBadges').innerHTML = '';
+    document.getElementById('parsePreview').textContent = '';
+    document.getElementById('parseError').textContent = msg;
+}
+
+// ============================================================
+// AI ANALYSIS
+// ============================================================
+function runAI() {
+    var btn = document.getElementById('aiBtn');
+    var body = document.getElementById('aiBody');
+    btn.disabled = true;
+    btn.innerHTML = '<div class="ai-spinner"></div> AI分析中...';
+    body.innerHTML = '<div class="ai-loading"><div class="ai-spinner"></div> 正在生成分析...</div>';
+
+    var stats = { this_week: thisWeekData, last_week: lastWeekData, growth: lastWeekData > 0 ? (((thisWeekData-lastWeekData)/lastWeekData)*100).toFixed(1) : '0', daily_avg: Object.keys(dailyData).length > 0 ? thisWeekData/Object.keys(dailyData).length : 0, peak_time: getPeak().time, peak_revenue: getPeak().rev };
+    var payload = { stats: stats, daily: dailyData, time_ranges: timeRangeData, weeks: groupByWeek() };
+
+    fetch(API + '/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+    .then(function(r){ return r.json(); })
+    .then(function(data) {
+        if (data.success && data.reply) {
+            body.innerHTML = '<div class="ai-text">'+data.reply.replace(/\n/g, '<br>')+'</div>';
+        } else {
+            body.innerHTML = '<div class="ai-placeholder"><div class="ai-placeholder-icon">⚠️</div><div>AI分析失败<br><small>'+(data.error||'未知错误')+'</small></div></div>';
+        }
+        btn.disabled = false;
+        btn.innerHTML = '<span>✨</span> 重新生成';
+    })
+    .catch(function(err) {
+        body.innerHTML = '<div class="ai-placeholder"><div class="ai-placeholder-icon">⚠️</div><div>网络错误，AI分析不可用<br><small>请确保服务器正在运行（python3 server.py）</small></div></div>';
+        btn.disabled = false;
+        btn.innerHTML = '<span>✨</span> 重新生成';
+    });
+}
+function getPeak() { var p={time:'-',rev:0}; Object.keys(timeRangeData).forEach(function(t){if(timeRangeData[t]>p.rev){p.rev=timeRangeData[t];p.time=t;}}); return p; }
+
+// ============================================================
+// INIT
+// ============================================================
+checkServer();
+setInterval(checkServer, 8000);
+</script>
+</body>
+</html>
