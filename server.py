@@ -157,12 +157,13 @@ def health():
 
 
 if __name__ == '__main__':
-    print("""
+    import os
+    port = int(os.environ.get('PORT', 5188))
+    print(f"""
 ╔══════════════════════════════════════╗
-║  🍸 AI酒吧数据分析平台 - 本地服务器  ║
+║  🍸 AI酒吧数据分析平台  ║
 ╠══════════════════════════════════════╣
-║  浏览器打开: http://localhost:5188  ║
-║  Ctrl+C 关闭服务器                  ║
+║  本地:   http://localhost:{port}  ║
 ╚══════════════════════════════════════╝
     """)
-    app.run(host='0.0.0.0', port=5188, debug=True)
+    app.run(host='0.0.0.0', port=port, debug=False)
